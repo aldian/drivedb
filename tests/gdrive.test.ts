@@ -116,6 +116,80 @@ describe("GoogleDriveClient REST API connector", () => {
     expect(walId).toBe("wal_folder_1");
   });
 
+  it("should deduplicate in-flight parallel calls to getOrCreateWalFolder", async () => {
+    const mockFetch = vi
+      .fn()
+      // Root folder search
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: [{ id: "root_1" }] }),
+      })
+      // Wal folder search: not found
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: [] }),
+      })
+      // Wal folder create
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: "wal_folder_single_flight" }),
+      });
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new GoogleDriveClient({
+      getToken: () => "mock_token",
+    });
+
+    // Fire 3 simultaneous calls
+    const [id1, id2, id3] = await Promise.all([
+      client.getOrCreateWalFolder(),
+      client.getOrCreateWalFolder(),
+      client.getOrCreateWalFolder(),
+    ]);
+
+    expect(id1).toBe("wal_folder_single_flight");
+    expect(id2).toBe("wal_folder_single_flight");
+    expect(id3).toBe("wal_folder_single_flight");
+    // Only 1 creation call should have been made
+    expect(mockFetch).toHaveBeenCalledTimes(3); // 1 root search + 1 wal search + 1 wal create
+  });
+
+  it("should detect duplicate wal folders, bind to active one and clean up empty duplicate", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url: string, opts?: RequestInit) => {
+      const urlStr = String(url);
+      // Root folder query
+      if (urlStr.includes("application%2Fvnd.google-apps.folder") && urlStr.includes("DriveDB%20Data")) {
+        return { ok: true, json: async () => ({ files: [{ id: "root_1" }] }) };
+      }
+      // Wal folder search returns TWO folders
+      if (urlStr.includes("name%20%3D%20'wal'")) {
+        return { ok: true, json: async () => ({ files: [{ id: "wal_active" }, { id: "wal_abandoned" }] }) };
+      }
+      // Check wal_active: contains 1 file
+      if (urlStr.includes("'wal_active'%20in%20parents")) {
+        return { ok: true, json: async () => ({ files: [{ id: "batch_1" }] }) };
+      }
+      // Check wal_abandoned: empty
+      if (urlStr.includes("'wal_abandoned'%20in%20parents")) {
+        return { ok: true, json: async () => ({ files: [] }) };
+      }
+      // DELETE call for abandoned folder
+      if (opts?.method === "DELETE" && urlStr.includes("wal_abandoned")) {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new GoogleDriveClient({
+      getToken: () => "mock_token",
+    });
+
+    const chosenWalId = await client.getOrCreateWalFolder();
+    expect(chosenWalId).toBe("wal_active");
+  });
+
   it("should upload immutable WAL batch using multipart format", async () => {
     const mockFetch = vi
       .fn()

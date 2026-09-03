@@ -17,6 +17,8 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
   private onFolderResolved?: (folderId: string) => Promise<void> | void;
   private cachedFolderId: string | null = null;
   private cachedWalFolderId: string | null = null;
+  private inFlightFolderPromise: Promise<string> | null = null;
+  private inFlightWalPromise: Promise<string> | null = null;
 
   constructor(options: GDriveOptions) {
     this.folderName = options.folderName || "DriveDB Data";
@@ -30,6 +32,8 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
   setFolderId(folderId: string | null): void {
     this.cachedFolderId = folderId;
     this.cachedWalFolderId = null; // Invalidate cached subfolder when root changes
+    this.inFlightFolderPromise = null;
+    this.inFlightWalPromise = null;
   }
 
   private async getAuthHeader(): Promise<HeadersInit> {
@@ -45,98 +49,157 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
 
   /**
    * Gets or creates the main app folder in Google Drive.
+   * Uses single-flight deduplication to avoid concurrent creation race conditions.
    */
   async getOrCreateFolder(): Promise<string> {
     if (this.cachedFolderId) return this.cachedFolderId;
+    if (this.inFlightFolderPromise) return this.inFlightFolderPromise;
 
-    const headers = await this.getAuthHeader();
-    const query = encodeURIComponent(
-      `name = '${this.folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
-    );
+    const promise = (async (): Promise<string> => {
+      try {
+        const headers = await this.getAuthHeader();
+        const query = encodeURIComponent(
+          `name = '${this.folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+        );
 
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
-      headers,
-    });
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+          headers,
+        });
 
-    if (!res.ok) {
-      throw new Error(`Failed to query Google Drive root folder: ${res.statusText}`);
-    }
+        if (!res.ok) {
+          throw new Error(`Failed to query Google Drive root folder: ${res.statusText}`);
+        }
 
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      this.cachedFolderId = data.files[0].id;
-      if (this.cachedFolderId) {
-        await this.onFolderResolved?.(this.cachedFolderId);
+        const data = await res.json();
+        if (data.files && data.files.length > 0) {
+          const folderId = data.files[0].id as string;
+          this.cachedFolderId = folderId;
+          await this.onFolderResolved?.(folderId);
+          return folderId;
+        }
+
+        // Create root folder
+        const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: this.folderName,
+            mimeType: "application/vnd.google-apps.folder",
+          }),
+        });
+
+        if (!createRes.ok) {
+          throw new Error(`Failed to create Google Drive root folder: ${createRes.statusText}`);
+        }
+
+        const created = await createRes.json();
+        const createdId = created.id as string;
+        this.cachedFolderId = createdId;
+        await this.onFolderResolved?.(createdId);
+        return createdId;
+      } finally {
+        this.inFlightFolderPromise = null;
       }
-      return this.cachedFolderId!;
-    }
+    })();
 
-    // Create root folder
-    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: this.folderName,
-        mimeType: "application/vnd.google-apps.folder",
-      }),
-    });
-
-    if (!createRes.ok) {
-      throw new Error(`Failed to create Google Drive root folder: ${createRes.statusText}`);
-    }
-
-    const created = await createRes.json();
-    this.cachedFolderId = created.id;
-    if (this.cachedFolderId) {
-      await this.onFolderResolved?.(this.cachedFolderId);
-    }
-    return this.cachedFolderId!;
+    this.inFlightFolderPromise = promise;
+    return promise;
   }
 
   /**
    * Gets or creates the `wal/` subfolder inside the app folder.
+   * Uses single-flight deduplication and auto-cleans abandoned duplicate folders.
    */
   async getOrCreateWalFolder(): Promise<string> {
     if (this.cachedWalFolderId) return this.cachedWalFolderId;
+    if (this.inFlightWalPromise) return this.inFlightWalPromise;
 
-    const rootFolderId = await this.getOrCreateFolder();
-    const headers = await this.getAuthHeader();
-    const query = encodeURIComponent(
-      `name = '${this.walFolderName}' and '${rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
-    );
+    const promise = (async (): Promise<string> => {
+      try {
+        const rootFolderId = await this.getOrCreateFolder();
+        const headers = await this.getAuthHeader();
+        const query = encodeURIComponent(
+          `name = '${this.walFolderName}' and '${rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+        );
 
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
-      headers,
-    });
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+          headers,
+        });
 
-    if (!res.ok) {
-      throw new Error(`Failed to query Google Drive WAL folder: ${res.statusText}`);
-    }
+        if (!res.ok) {
+          throw new Error(`Failed to query Google Drive WAL folder: ${res.statusText}`);
+        }
 
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      this.cachedWalFolderId = data.files[0].id;
-      return this.cachedWalFolderId!;
-    }
+        const data = await res.json();
+        const files: Array<{ id: string; name: string }> = data.files || [];
 
-    // Create wal folder inside root folder
-    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: this.walFolderName,
-        parents: [rootFolderId],
-        mimeType: "application/vnd.google-apps.folder",
-      }),
-    });
+        if (files.length > 0) {
+          // If multiple wal folders exist, identify the active one with files and clean up empty duplicates
+          if (files.length > 1) {
+            let activeFolderId = files[0].id;
+            const emptyFolderIds: string[] = [];
 
-    if (!createRes.ok) {
-      throw new Error(`Failed to create Google Drive WAL folder: ${createRes.statusText}`);
-    }
+            for (const folder of files) {
+              const checkQ = encodeURIComponent(`'${folder.id}' in parents and trashed = false`);
+              const checkRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${checkQ}&pageSize=1&fields=files(id)`,
+                { headers }
+              );
+              if (checkRes.ok) {
+                const checkData = await checkRes.json();
+                if (checkData.files && checkData.files.length > 0) {
+                  activeFolderId = folder.id;
+                } else {
+                  emptyFolderIds.push(folder.id);
+                }
+              }
+            }
 
-    const created = await createRes.json();
-    this.cachedWalFolderId = created.id;
-    return this.cachedWalFolderId!;
+            // Automatically clean up abandoned empty duplicate folders
+            for (const emptyId of emptyFolderIds) {
+              if (emptyId !== activeFolderId) {
+                await fetch(`https://www.googleapis.com/drive/v3/files/${emptyId}`, {
+                  method: "DELETE",
+                  headers,
+                }).catch(() => null);
+              }
+            }
+
+            this.cachedWalFolderId = activeFolderId;
+            return activeFolderId;
+          }
+
+          const singleId = files[0].id;
+          this.cachedWalFolderId = singleId;
+          return singleId;
+        }
+
+        // Create wal folder inside root folder
+        const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: this.walFolderName,
+            parents: [rootFolderId],
+            mimeType: "application/vnd.google-apps.folder",
+          }),
+        });
+
+        if (!createRes.ok) {
+          throw new Error(`Failed to create Google Drive WAL folder: ${createRes.statusText}`);
+        }
+
+        const created = await createRes.json();
+        const createdId = created.id as string;
+        this.cachedWalFolderId = createdId;
+        return createdId;
+      } finally {
+        this.inFlightWalPromise = null;
+      }
+    })();
+
+    this.inFlightWalPromise = promise;
+    return promise;
   }
 
   /**
