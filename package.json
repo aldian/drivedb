@@ -1,6 +1,6 @@
 {
   "name": "@aldian/drivedb",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lightweight, local-first, zero-backend database for single-user web applications with IndexedDB caching and Append-Only Delta Log (WAL) Google Drive cloud synchronization.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
