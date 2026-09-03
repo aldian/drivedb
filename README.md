@@ -218,6 +218,22 @@ export function useHabits() {
 
 ---
 
+## 🚢 Automated Releases
+
+This package uses tag-based publishing via GitHub Actions:
+
+```bash
+# 1. Bump version and create git tag (e.g. v0.1.1)
+npm version patch   # or minor / major
+
+# 2. Push commit and tag to trigger automated npm release
+git push origin main --follow-tags
+```
+
+GitHub Actions will automatically run the test suite (with coverage checks), build the ESM/CJS distributions, and publish `@aldian/drivedb` with provenance to the npm registry.
+
+---
+
 ## 📄 License
 
 MIT © [Aldian Fazrihady](https://github.com/aldian)
