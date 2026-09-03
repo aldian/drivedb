@@ -1,15 +1,16 @@
 # 📦 DriveDB Releasing & Publishing Guide
 
-This document outlines the standard procedure for releasing new versions of `@aldian/drivedb` from your local development machine.
+This document outlines the standard procedure for releasing new versions of the package (or your own custom fork) from a local development machine.
 
 ---
 
 ## 🔑 1. Prerequisites
 
-Before publishing, ensure you are logged into your npm account with publishing rights for the `@aldian` scope:
+Before publishing, ensure you are logged into an npm account with publishing rights for the package scope:
 
 ```bash
 npm whoami
+# Should output your npm username
 ```
 
 If not logged in, authenticate using your web browser or command line:
@@ -93,8 +94,8 @@ git push origin main --follow-tags
 ## ❓ Troubleshooting
 
 ### 1. `E403 Forbidden - Package name too similar`
-* **Cause**: Attempting to publish without the `@aldian/` scope.
-* **Fix**: Ensure `package.json` has `"name": "@aldian/drivedb"` and use `--access public`.
+* **Cause**: Attempting to publish an unscoped package name that collides with an existing package on npm.
+* **Fix**: Ensure `package.json` uses a scoped package name (e.g. `"@<your-username>/drivedb"`) and publish with `--access public`.
 
 ### 2. `E403 Forbidden - You cannot publish over previously published versions`
 * **Cause**: Trying to re-publish a version number that already exists on npm (npm versions are immutable).

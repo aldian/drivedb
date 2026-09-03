@@ -230,8 +230,10 @@ npm login
 Verify authentication:
 ```bash
 npm whoami
-# Should output: aldian
+# Should output your npm username
 ```
+
+> **💡 For Forks & Custom Builds**: If you are forking this repository to customize or publish your own variation, update the `"name"` field in `package.json` to your own npm scope (e.g. `"@<your-username>/drivedb"`).
 
 ---
 
