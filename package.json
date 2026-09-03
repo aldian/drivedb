@@ -1,0 +1,53 @@
+{
+  "name": "drivedb",
+  "version": "0.1.0",
+  "description": "Lightweight, local-first, zero-backend database for single-user web applications with IndexedDB caching and Append-Only Delta Log (WAL) Google Drive cloud synchronization.",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "indexeddb",
+    "google-drive",
+    "local-first",
+    "offline-first",
+    "database",
+    "gdrive",
+    "wal",
+    "write-ahead-log",
+    "caching",
+    "sync",
+    "crdt",
+    "byod"
+  ],
+  "author": "Aldian Fazrihady <mobile@aldian.net>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@typescript-eslint/eslint-plugin": "^8.24.0",
+    "@typescript-eslint/parser": "^8.24.0",
+    "eslint": "^9.20.0",
+    "fake-indexeddb": "^6.0.0",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
