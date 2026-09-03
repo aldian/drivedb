@@ -12,11 +12,14 @@ drivedb_config:
   broadcast_channel_enabled: true
 
 gdrive_config:
-  default_folder_name: "DriveDB Data"
+  client_defined_folder_name: true
+  default_folder_naming: "${dbName}_drivedb_<uuid>"
   wal_subfolder_name: "wal"
   snapshot_file_name: "snapshot.json"
   oauth_scope: "https://www.googleapis.com/auth/drive.file"
   auto_sync_on_write: true
+  single_flight_mutex: true
+  auto_duplicate_wal_cleanup: true
 ```
 
 ---
@@ -26,6 +29,13 @@ gdrive_config:
 * **Local In-Memory Cache**: Zero-latency reads and writes ($0\text{ms}$).
 * **Materialized IndexedDB Store**: Durable local view for offline querying.
 * **Outbox WAL**: Local transaction log recording atomic mutations (`SET`, `DELETE`).
+* **Client-Controlled Folder Naming & Unique Scoping**:
+  - The client application explicitly decides its Google Drive folder name (`gdriveFolderName`) or passes a direct Google Drive folder ID (`gdriveFolderId`).
+  - If omitted, DriveDB auto-generates an isolated folder name scoped to the database name (`${dbName}_drivedb_<uuid>`) to prevent cross-app collisions.
+  - The resolved folder ID is persisted in local IndexedDB metadata, eliminating redundant name queries.
+* **Concurrency Protection & Single-Flight Mutex**:
+  - In-flight requests to get or create folders share a deduplication mutex to prevent parallel race conditions.
+  - If duplicate `wal/` subfolders exist on Google Drive, DriveDB automatically detects the active folder containing files and issues a `DELETE` request to clean up abandoned empty duplicates.
 * **Cloud Storage on Google Drive**:
   - Remote directory `wal/`: Stores immutable batch log files (`{timestamp}_{clientId}_{batchId}.json`).
   - Remote file `snapshot.json`: Stores periodic consolidated state snapshots.
@@ -136,4 +146,43 @@ Feature: Snapshot Compaction
     When compaction triggers
     Then a consolidated `snapshot.json` is uploaded with all current non-deleted records
     And older compacted WAL files are archived or removed
+```
+
+### Scenario 6: Client-Decided Folder Naming, UUID Scoping & Folder ID Binding
+```gherkin
+Feature: Client-Controlled Folder Naming and Isolation
+  As an application developer using DriveDB
+  I want to specify my own Google Drive folder name or have it safely auto-isolated
+  So that multiple apps do not collide into a generic folder name
+
+  Scenario: Client specifies custom folder name
+    Given an application sets `gdriveFolderName: "St. Mary Clinic Records"`
+    When DriveDB initializes cloud sync
+    Then Google Drive creates or connects to folder "St. Mary Clinic Records"
+    And the folder ID is persisted in local IndexedDB metadata
+
+  Scenario: Automatic UUID scoping when folder name is omitted
+    Given an application initializes with `dbName: "patient_emr"` and no folder name
+    When DriveDB initializes cloud sync
+    Then the created folder name starts with "patient_emr_drivedb_" followed by a unique UUID
+```
+
+### Scenario 7: Single-Flight Mutex & Duplicate Folder Auto-Cleanup
+```gherkin
+Feature: Concurrency Mutex and Duplicate Folder Auto-Cleanup
+  As an application triggering multiple concurrent sync operations on startup
+  I want in-flight folder requests deduplicated and duplicate folders cleaned up
+  So that Google Drive never accumulates orphaned duplicate wal folders
+
+  Scenario: In-flight deduplication of concurrent folder creation
+    Given 3 parallel asynchronous calls to `getOrCreateWalFolder()`
+    When the calls execute concurrently
+    Then only 1 network creation request is sent to Google Drive
+    And all 3 calls resolve to the exact same folder ID
+
+  Scenario: Auto-cleanup of abandoned empty duplicate folders
+    Given Google Drive contains two folders named "wal" where one has files and one is empty
+    When DriveDB resolves the WAL folder
+    Then DriveDB binds to the active folder containing files
+    And issues a DELETE request to permanently remove the empty duplicate folder
 ```
