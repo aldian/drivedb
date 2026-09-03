@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { DriveDB } from "@/drivedb";
 import { WalEngine } from "@/wal/engine";
@@ -235,6 +235,180 @@ describe("DriveDB: Append-Only Delta Log (WAL) Database Engine", () => {
       expect(freshDb.get("setting_2")?.data.fontSize).toBe(18);
 
       await freshDb.close();
+    });
+  });
+
+  describe("Scenario 6: Dynamic Tokens, Sync Listeners & Compaction Integration", () => {
+    it("should support find and query predicates", async () => {
+      await db.set("item_a", { theme: "dark", fontSize: 10, notifications: false });
+      await db.set("item_b", { theme: "light", fontSize: 20, notifications: true });
+
+      const found = db.find((d) => d.data.fontSize === 20);
+      expect(found?.id).toBe("item_b");
+
+      const notFound = db.find((d) => d.data.fontSize === 99);
+      expect(notFound).toBeNull();
+    });
+
+    it("should allow dynamic access token switching", async () => {
+      expect(await db.sync()).toBe(false); // No token initially
+
+      db.setAccessToken("test_access_token_123");
+      // Setting token dynamically configures the driveClient
+      db.setAccessToken(null); // Clearing token removes it
+      expect(await db.sync()).toBe(false);
+    });
+
+    it("should subscribe and unsubscribe from sync lifecycle events", async () => {
+      let eventCount = 0;
+      const unsubscribe = db.onSyncChange(() => {
+        eventCount++;
+      });
+
+      await db.set("ev_test", { theme: "dark", fontSize: 12, notifications: true });
+      unsubscribe();
+      expect(typeof unsubscribe).toBe("function");
+    });
+
+    it("should execute two-way sync with Google Drive", async () => {
+      const syncDb = new DriveDB<UserSetting>({
+        dbName: `sync_int_test_${Date.now()}`,
+        tableName: "settings",
+        accessToken: "test_token_xyz",
+        autoSync: false,
+      });
+      await syncDb.init();
+
+      // Mock remote WAL batch from Device Beta
+      const remoteBatch: WalBatch<UserSetting> = {
+        batchId: "b_remote_sync",
+        clientId: "dev_beta",
+        timestamp: 5000,
+        mutations: [
+          {
+            op: "SET",
+            id: "remote_note",
+            data: { theme: "light", fontSize: 14, notifications: true },
+            timestamp: 5000,
+            clientId: "dev_beta",
+            seq: 1,
+          },
+        ],
+      };
+
+      const mockFetch = vi.fn(async (url: RequestInfo | URL) => {
+        const urlStr = String(url);
+        // Root folder query
+        if (urlStr.includes("mimeType = 'application/vnd.google-apps.folder'") && !urlStr.includes("in parents")) {
+          return {
+            ok: true,
+            json: async () => ({ files: [{ id: "root_folder_1" }] }),
+          } as Response;
+        }
+        // WAL folder query
+        if (urlStr.includes("in parents") && urlStr.includes("name = 'wal'")) {
+          return {
+            ok: true,
+            json: async () => ({ files: [{ id: "wal_folder_1" }] }),
+          } as Response;
+        }
+        // List WAL files since
+        if (urlStr.includes("orderBy=createdTime")) {
+          return {
+            ok: true,
+            json: async () => ({
+              files: [{ id: "wal_file_1", name: "wal_5000.json", modifiedTime: "2026-09-03T10:00:00Z" }],
+            }),
+          } as Response;
+        }
+        // Download WAL batch file
+        if (urlStr.includes("wal_file_1?alt=media")) {
+          return {
+            ok: true,
+            json: async () => remoteBatch,
+          } as Response;
+        }
+        // Upload multipart WAL batch
+        if (urlStr.includes("uploadType=multipart")) {
+          return {
+            ok: true,
+            json: async () => ({ id: "new_wal_uploaded_id" }),
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      const origFetch = global.fetch;
+      global.fetch = mockFetch as unknown as typeof fetch;
+
+      try {
+        // Queue a local mutation
+        await syncDb.set("local_doc", { theme: "dark", fontSize: 20, notifications: false });
+
+        // Run sync
+        const synced = await syncDb.sync();
+        expect(synced).toBe(true);
+
+        // Verify remote batch was replayed into local DB
+        expect(syncDb.get("remote_note")?.data.theme).toBe("light");
+        // Verify local doc is marked synced
+        expect(syncDb.get("local_doc")?.syncStatus).toBe("synced");
+      } finally {
+        global.fetch = origFetch;
+        await syncDb.close();
+      }
+    });
+
+    it("should execute compact to consolidate state into snapshot.json", async () => {
+      const compactDb = new DriveDB<UserSetting>({
+        dbName: `compact_int_test_${Date.now()}`,
+        tableName: "settings",
+        accessToken: "test_token_compact",
+        autoSync: false,
+      });
+      await compactDb.init();
+      await compactDb.set("item_x", { theme: "dark", fontSize: 16, notifications: true });
+
+      const mockFetch = vi.fn(async (url: RequestInfo | URL) => {
+        const urlStr = String(url);
+        // Root folder
+        if (urlStr.includes("mimeType = 'application/vnd.google-apps.folder'") && !urlStr.includes("in parents")) {
+          return { ok: true, json: async () => ({ files: [{ id: "root_1" }] }) } as Response;
+        }
+        // Search snapshot.json
+        if (urlStr.includes("name = 'snapshot.json'")) {
+          return { ok: true, json: async () => ({ files: [] }) } as Response;
+        }
+        // Upload snapshot
+        if (urlStr.includes("uploadType=multipart")) {
+          return { ok: true, json: async () => ({ id: "snap_file_id" }) } as Response;
+        }
+        // List WAL files for cleanup
+        if (urlStr.includes("orderBy=createdTime")) {
+          return {
+            ok: true,
+            json: async () => ({
+              files: [{ id: "old_wal_1", modifiedTime: new Date(Date.now() - 1000).toISOString() }],
+            }),
+          } as Response;
+        }
+        // WAL subfolder search
+        if (urlStr.includes("name = 'wal'")) {
+          return { ok: true, json: async () => ({ files: [{ id: "wal_1" }] }) } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      const origFetch = global.fetch;
+      global.fetch = mockFetch as unknown as typeof fetch;
+
+      try {
+        const snapshotId = await compactDb.compact();
+        expect(snapshotId).toBe("snap_file_id");
+      } finally {
+        global.fetch = origFetch;
+        await compactDb.close();
+      }
     });
   });
 });
