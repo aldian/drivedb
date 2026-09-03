@@ -2,7 +2,7 @@
 
 > **Lightweight, local-first, zero-backend database for single-user web applications with IndexedDB caching and Append-Only Delta Log (WAL) Google Drive cloud synchronization.**
 
-[![npm version](https://img.shields.io/badge/npm-v0.1.0-blue.svg)](https://www.npmjs.com/package/drivedb)
+[![npm version](https://img.shields.io/badge/npm-v0.1.0-blue.svg)](https://www.npmjs.com/package/@aldian/drivedb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)]()
@@ -74,11 +74,11 @@ flowchart TD
 ## 📦 Installation
 
 ```bash
-npm install drivedb
+npm install @aldian/drivedb
 # or
-pnpm add drivedb
+pnpm add @aldian/drivedb
 # or
-yarn add drivedb
+yarn add @aldian/drivedb
 ```
 
 ---
@@ -87,7 +87,7 @@ yarn add drivedb
 
 ### 1. Initialize DriveDB
 ```typescript
-import { DriveDB } from "drivedb";
+import { DriveDB } from "@aldian/drivedb";
 
 interface Note {
   title: string;
@@ -151,7 +151,7 @@ await db.sync();
 
 ```typescript
 import { useState, useEffect } from "react";
-import { DriveDB, Document, SyncStatus } from "drivedb";
+import { DriveDB, Document, SyncStatus } from "@aldian/drivedb";
 
 interface Habit {
   name: string;
