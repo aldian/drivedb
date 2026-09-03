@@ -218,19 +218,53 @@ export function useHabits() {
 
 ---
 
-## 🚢 Automated Releases
+## 🚢 Release & Publishing Guide
 
-This package uses tag-based publishing via GitHub Actions:
+Releases are published directly and securely from your local machine.
 
+### Prerequisites (One-Time)
+Ensure you are logged into your npm account in your local terminal:
 ```bash
-# 1. Bump version and create git tag (e.g. v0.1.1)
-npm version patch   # or minor / major
+npm login
+```
+Verify authentication:
+```bash
+npm whoami
+# Should output: aldian
+```
 
-# 2. Push commit and tag to trigger automated npm release
+---
+
+### Step-by-Step Publishing Workflow
+
+#### 1. (Initial Release) Publish Version 0.1.0
+If publishing for the first time:
+```bash
+npm publish --access public
+```
+
+#### 2. (Subsequent Updates) Bump Version & Release
+For subsequent updates, use semantic versioning:
+```bash
+# 1. Bump the version in package.json and generate a git tag
+npm version patch   # 0.1.0 -> 0.1.1 (Bug fixes / minor adjustments)
+# or: npm version minor  # 0.1.0 -> 0.2.0 (New backward-compatible features)
+# or: npm version major  # 0.1.0 -> 1.0.0 (Breaking API changes)
+
+# 2. Publish to the public npm registry
+npm publish --access public
+
+# 3. Push the version bump commit and git tag to GitHub
 git push origin main --follow-tags
 ```
 
-GitHub Actions will automatically run the test suite (with coverage checks), build the ESM/CJS distributions, and publish `@aldian/drivedb` with provenance to the npm registry.
+> **🛡️ Built-in Safety Check (`prepublishOnly`)**:
+> The `package.json` includes a `prepublishOnly` lifecycle hook. Whenever you run `npm publish`, npm automatically executes:
+> 1. `tsc --noEmit` (TypeScript typecheck)
+> 2. `vitest run --coverage` (All 31 tests & 92% coverage threshold)
+> 3. `tsup build` (Bundling clean ESM, CJS, and `.d.ts` outputs)
+>
+> If any test or type error occurs, the publish is aborted immediately, preventing broken builds from reaching npm.
 
 ---
 
