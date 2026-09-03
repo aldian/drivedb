@@ -33,6 +33,33 @@ gdrive_config:
   - **Deterministic Replay**: Clients download new WAL batches and replay them in timestamp order with Last-Write-Wins (LWW) convergence.
   - **Compaction**: Periodically collapses old log batches into a new `snapshot.json` to keep Drive tidy and fast.
 
+```mermaid
+flowchart TD
+    subgraph Client["🖥️ Client Browser"]
+        Action["User Action in UI"] -->|"Instant (0ms)"| MemCache["In-Memory Cache<br/>(Synchronous get / query / list)"]
+        MemCache -->|"Async Persistence"| IDB[("Materialized IndexedDB Store<br/>(Fast offline view)")]
+        MemCache -->|"Non-Blocking Mutation"| Outbox[("Local WAL Outbox<br/>(Queued SET & DELETE mutations)")]
+        Outbox -->|"Debounced Flush (e.g. 1000ms)"| Worker["Sync Worker"]
+    end
+
+    subgraph GDrive["☁️ Google Drive (Cloud Truth)"]
+        direction TB
+        AppFolder["📁 DriveDB Data/"]
+        Snapshot["📄 snapshot.json<br/>(Compacted Base State)"]
+        WalFolder["📁 wal/"]
+        BatchA["📄 wal_1725350100_devicePhone_b1.json<br/>(Immutable Delta Batch)"]
+        BatchB["📄 wal_1725350200_deviceLaptop_b2.json<br/>(Immutable Delta Batch)"]
+
+        AppFolder --> Snapshot
+        AppFolder --> WalFolder
+        WalFolder --> BatchA
+        WalFolder --> BatchB
+    end
+
+    Worker -->|"Google Drive v3 REST API<br/>(Immutable Multipart Upload)"| WalFolder
+    Snapshot -.->|"Periodic Compaction"| WalFolder
+```
+
 ---
 
 ## 2. BDD Scenarios (Gherkin)
