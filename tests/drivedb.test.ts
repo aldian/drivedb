@@ -411,4 +411,62 @@ describe("DriveDB: Append-Only Delta Log (WAL) Database Engine", () => {
       }
     });
   });
+
+  describe("Scenario 7: Client-Decided Folder Naming, UUID Scoping & Folder ID Binding", () => {
+    it("should allow client to strictly specify their own folder name", () => {
+      const clientDb = new DriveDB<UserSetting>({
+        dbName: "notes_app",
+        gdriveFolderName: "Medical Clinic Records",
+        appendFolderUuid: false,
+      });
+
+      expect((clientDb as any).options.gdriveFolderName).toBe("Medical Clinic Records");
+    });
+
+    it("should append a UUID to custom folder name if appendFolderUuid is enabled", () => {
+      const clientDb = new DriveDB<UserSetting>({
+        dbName: "notes_app",
+        gdriveFolderName: "Medical Clinic Records",
+        appendFolderUuid: true,
+      });
+
+      const folderName = (clientDb as any).options.gdriveFolderName as string;
+      expect(folderName.startsWith("Medical Clinic Records_")).toBe(true);
+      expect(folderName.length).toBeGreaterThan("Medical Clinic Records_".length);
+    });
+
+    it("should auto-generate an isolated folder name scoped to dbName with UUID if omitted", () => {
+      const autoDb = new DriveDB<UserSetting>({
+        dbName: "patient_emr",
+      });
+
+      const folderName = (autoDb as any).options.gdriveFolderName as string;
+      expect(folderName.startsWith("patient_emr_drivedb_")).toBe(true);
+    });
+
+    it("should support explicit and persisted gdriveFolderId binding", async () => {
+      const dbWithFolder = new DriveDB<UserSetting>({
+        dbName: `folder_persist_${Date.now()}`,
+        tableName: "settings",
+      });
+      await dbWithFolder.init();
+
+      expect(dbWithFolder.getGdriveFolderId()).toBeUndefined();
+
+      // Explicitly bind a folder ID (e.g. from Google Drive Picker)
+      await dbWithFolder.setGdriveFolderId("folder_xyz_12345");
+      expect(dbWithFolder.getGdriveFolderId()).toBe("folder_xyz_12345");
+      await dbWithFolder.close();
+
+      // Create another instance with the same dbName -> should hydrate persisted folder ID
+      const secondDb = new DriveDB<UserSetting>({
+        dbName: (dbWithFolder as any).options.dbName,
+        tableName: "settings",
+      });
+      await secondDb.init();
+      expect(secondDb.getGdriveFolderId()).toBe("folder_xyz_12345");
+
+      await secondDb.close();
+    });
+  });
 });

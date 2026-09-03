@@ -50,8 +50,24 @@ export interface DriveDbOptions {
   syncDebounceMs?: number;
   /** Whether to automatically sync on writes when Google Drive is connected (default: true) */
   autoSync?: boolean;
-  /** Google Drive designated folder name (default: "DriveDB Data") */
+  /**
+   * Google Drive designated folder name.
+   * Defined by the client (e.g. "My Journal", "Personal Budget", "Hanzi Scribe").
+   * If omitted, dynamically defaults to `${dbName}_data` to prevent multi-app collisions.
+   */
   gdriveFolderName?: string;
+  /**
+   * Optional exact Google Drive Folder ID.
+   * If provided (or saved from a previous session / Google Drive Picker),
+   * DriveDB binds directly to this exact folder instead of performing name searches.
+   */
+  gdriveFolderId?: string;
+  /**
+   * If true, appends a unique short UUID to the folder name upon creation
+   * (e.g. "MyApp_Data_a8f3b") to ensure zero name collisions in the user's Drive.
+   * (default: true if gdriveFolderName was auto-generated, false if explicitly specified by client)
+   */
+  appendFolderUuid?: boolean;
   /** Subfolder name for WAL batches in Google Drive (default: "wal") */
   walFolderName?: string;
   /** Snapshot file name in Google Drive (default: "snapshot.json") */

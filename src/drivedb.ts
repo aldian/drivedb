@@ -15,9 +15,10 @@ import { SyncWorker } from "@/sync/worker";
 import { WalEngine } from "@/wal/engine";
 
 export class DriveDB<T = Record<string, unknown>> {
-  private options: Required<Omit<DriveDbOptions, "accessToken" | "clientId">> & {
+  private options: Required<Omit<DriveDbOptions, "accessToken" | "clientId" | "gdriveFolderId">> & {
     accessToken?: string | (() => string | null | Promise<string | null>);
     clientId: string;
+    gdriveFolderId?: string;
   };
   private storage: IndexedDbStorage<T>;
   private driveClient: GoogleDriveClient<T> | null = null;
@@ -31,12 +32,27 @@ export class DriveDB<T = Record<string, unknown>> {
       options.clientId ||
       `client_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
 
+    // Resolve client-decided or uniquely scoped folder name
+    const shortUuid = Math.random().toString(36).substring(2, 7);
+    let resolvedFolderName: string;
+    if (options.gdriveFolderName) {
+      resolvedFolderName = options.appendFolderUuid
+        ? `${options.gdriveFolderName}_${shortUuid}`
+        : options.gdriveFolderName;
+    } else {
+      // Auto-generated name is strictly scoped to the dbName to prevent cross-app collisions
+      const baseName = options.dbName ? `${options.dbName}_drivedb` : "app_drivedb";
+      resolvedFolderName = `${baseName}_${shortUuid}`;
+    }
+
     this.options = {
       dbName: options.dbName || "drivedb_store",
       tableName: options.tableName || "documents",
       syncDebounceMs: options.syncDebounceMs ?? 1000,
       autoSync: options.autoSync ?? true,
-      gdriveFolderName: options.gdriveFolderName || "DriveDB Data",
+      gdriveFolderName: resolvedFolderName,
+      gdriveFolderId: options.gdriveFolderId,
+      appendFolderUuid: options.appendFolderUuid ?? false,
       walFolderName: options.walFolderName || "wal",
       snapshotFileName: options.snapshotFileName || "snapshot.json",
       maxUncompactedLogs: options.maxUncompactedLogs ?? 50,
@@ -56,9 +72,14 @@ export class DriveDB<T = Record<string, unknown>> {
 
       this.driveClient = new GoogleDriveClient<T>({
         folderName: this.options.gdriveFolderName,
+        folderId: this.options.gdriveFolderId,
         walFolderName: this.options.walFolderName,
         snapshotFileName: this.options.snapshotFileName,
         getToken: tokenFn,
+        onFolderResolved: async (folderId) => {
+          this.options.gdriveFolderId = folderId;
+          await this.storage.setMeta("gdrive_folder_id", folderId);
+        },
       });
     }
 
@@ -107,12 +128,37 @@ export class DriveDB<T = Record<string, unknown>> {
     await this.storage.init(this.options.requestPersistence);
     await this.reloadFromStorage();
 
+    // Hydrate persisted Google Drive folder ID from previous sessions if not explicitly set
+    if (!this.options.gdriveFolderId) {
+      const persistedFolderId = (await this.storage.getMeta("gdrive_folder_id")) as string | null;
+      if (persistedFolderId) {
+        this.options.gdriveFolderId = persistedFolderId;
+        this.driveClient?.setFolderId(persistedFolderId);
+      }
+    }
+
     this.isInitialized = true;
 
     // Trigger initial background sync if connected and enabled
     if (this.driveClient && this.options.autoSync) {
       void this.sync();
     }
+  }
+
+  /**
+   * Returns the resolved Google Drive folder ID, if known.
+   */
+  getGdriveFolderId(): string | undefined {
+    return this.options.gdriveFolderId;
+  }
+
+  /**
+   * Explicitly sets a Google Drive folder ID (e.g. chosen from Google Drive Picker).
+   */
+  async setGdriveFolderId(folderId: string): Promise<void> {
+    this.options.gdriveFolderId = folderId;
+    this.driveClient?.setFolderId(folderId);
+    await this.storage.setMeta("gdrive_folder_id", folderId);
   }
 
   /**
@@ -128,9 +174,14 @@ export class DriveDB<T = Record<string, unknown>> {
     const tokenFn = typeof token === "function" ? token : () => token;
     this.driveClient = new GoogleDriveClient<T>({
       folderName: this.options.gdriveFolderName,
+      folderId: this.options.gdriveFolderId,
       walFolderName: this.options.walFolderName,
       snapshotFileName: this.options.snapshotFileName,
       getToken: tokenFn,
+      onFolderResolved: async (folderId) => {
+        this.options.gdriveFolderId = folderId;
+        await this.storage.setMeta("gdrive_folder_id", folderId);
+      },
     });
 
     this.worker.setDriveClient(this.driveClient);

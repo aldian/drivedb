@@ -2,9 +2,11 @@ import { Snapshot, WalBatch } from "@/types";
 
 export interface GDriveOptions {
   folderName?: string;
+  folderId?: string;
   walFolderName?: string;
   snapshotFileName?: string;
   getToken: () => string | null | Promise<string | null>;
+  onFolderResolved?: (folderId: string) => Promise<void> | void;
 }
 
 export class GoogleDriveClient<T = Record<string, unknown>> {
@@ -12,6 +14,7 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
   private walFolderName: string;
   private snapshotFileName: string;
   private getToken: () => string | null | Promise<string | null>;
+  private onFolderResolved?: (folderId: string) => Promise<void> | void;
   private cachedFolderId: string | null = null;
   private cachedWalFolderId: string | null = null;
 
@@ -20,6 +23,13 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
     this.walFolderName = options.walFolderName || "wal";
     this.snapshotFileName = options.snapshotFileName || "snapshot.json";
     this.getToken = options.getToken;
+    this.onFolderResolved = options.onFolderResolved;
+    this.cachedFolderId = options.folderId || null;
+  }
+
+  setFolderId(folderId: string | null): void {
+    this.cachedFolderId = folderId;
+    this.cachedWalFolderId = null; // Invalidate cached subfolder when root changes
   }
 
   private async getAuthHeader(): Promise<HeadersInit> {
@@ -55,6 +65,9 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
     const data = await res.json();
     if (data.files && data.files.length > 0) {
       this.cachedFolderId = data.files[0].id;
+      if (this.cachedFolderId) {
+        await this.onFolderResolved?.(this.cachedFolderId);
+      }
       return this.cachedFolderId!;
     }
 
@@ -74,6 +87,9 @@ export class GoogleDriveClient<T = Record<string, unknown>> {
 
     const created = await createRes.json();
     this.cachedFolderId = created.id;
+    if (this.cachedFolderId) {
+      await this.onFolderResolved?.(this.cachedFolderId);
+    }
     return this.cachedFolderId!;
   }
 

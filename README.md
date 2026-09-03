@@ -207,7 +207,9 @@ export function useHabits() {
 | `tableName` | `string` | `"documents"` | IndexedDB object store table name |
 | `syncDebounceMs` | `number` | `1000` | Milliseconds to debounce before uploading WAL to Google Drive |
 | `autoSync` | `boolean` | `true` | Automatically trigger cloud sync on local writes |
-| `gdriveFolderName` | `string` | `"DriveDB Data"` | Target folder name in user's Google Drive |
+| `gdriveFolderName` | `string` | `"${dbName}_drivedb_<uuid>"` | Custom target folder name in Google Drive (decided by client) |
+| `gdriveFolderId` | `string` | `undefined` | Optional explicit Google Drive folder ID (e.g. from Drive Picker) |
+| `appendFolderUuid` | `boolean` | `false` | Append short UUID suffix to folder name to guarantee uniqueness |
 | `walFolderName` | `string` | `"wal"` | Subfolder name for immutable WAL batches |
 | `snapshotFileName` | `string` | `"snapshot.json"` | Consolidated snapshot filename |
 | `maxUncompactedLogs` | `number` | `50` | Max WAL batches before auto-compaction |

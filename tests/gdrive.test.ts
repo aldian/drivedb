@@ -46,6 +46,23 @@ describe("GoogleDriveClient REST API connector", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("should use explicit folderId directly without search", async () => {
+    const mockFetch = vi.fn();
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new GoogleDriveClient({
+      folderId: "exact_folder_id_999",
+      getToken: () => "mock_token",
+    });
+
+    const folderId = await client.getOrCreateFolder();
+    expect(folderId).toBe("exact_folder_id_999");
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    client.setFolderId("updated_folder_888");
+    expect(await client.getOrCreateFolder()).toBe("updated_folder_888");
+  });
+
   it("should create a folder if not found in Google Drive", async () => {
     const mockFetch = vi
       .fn()
